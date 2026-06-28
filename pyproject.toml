@@ -1,0 +1,10 @@
+[project]
+name = "lofi-radio"
+version = "0.1.0"
+description = "Lo-Fi Radio - A retro-styled web radio player"
+readme = "README.md"
+requires-python = ">=3.14"
+dependencies = [
+    "fastapi>=0.138.1",
+    "uvicorn[standard]>=0.34.0",
+]

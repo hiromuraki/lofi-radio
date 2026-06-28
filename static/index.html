@@ -1,0 +1,684 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Lo-Fi Radio</title>
+    <link rel="stylesheet" href="/fonts/fonts.css" />
+
+    <style>
+        /* ── variables ─────────────────────────────────────────── */
+        :root {
+            --bg: #08080f;
+            --glass-bg: rgba(18, 18, 36, 0.55);
+            --glass-border: rgba(255, 255, 255, 0.08);
+            --text: #e4e4ec;
+            --text-dim: #8888a0;
+            --accent: #f0a040;
+            --accent-glow: rgba(240, 160, 64, 0.25);
+            --crt-speed: 0.6s;
+        }
+
+        /* ── reset ──────────────────────────────────────────────── */
+        *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+        html, body {
+            width: 100vw; height: 100vh;
+            overflow: hidden;
+            font-family: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            color: var(--text);
+            background: var(--bg);
+            user-select: none;
+        }
+
+        /* ── glass utility ──────────────────────────────────────── */
+        .glass {
+            background: var(--glass-bg);
+            backdrop-filter: blur(16px);
+            -webkit-backdrop-filter: blur(16px);
+            border: 1px solid var(--glass-border);
+            border-radius: 14px;
+        }
+
+        /* ── CRT screen area (fills viewport) ───────────────────── */
+        .crt-screen {
+            position: absolute;
+            inset: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 1;
+            /* beam collapse state: off */
+            transform: scale(0, 0.005);
+            opacity: 0;
+        }
+        body.power-on .crt-screen {
+            animation: crt-on var(--crt-speed) ease-out forwards;
+        }
+        body.power-off .crt-screen {
+            animation: crt-off var(--crt-speed) ease-in forwards;
+        }
+
+        @keyframes crt-on {
+            0%   { transform: scale(0, 0.005); opacity: 1; filter: brightness(30); }
+            50%   { transform: scale(1, 0.005); filter: brightness(10); opacity: 1; }
+            100% { transform: scale(1, 1); filter: brightness(1); opacity: 1; }
+        }
+        @keyframes crt-off {
+            0%   { transform: scale(1, 1); filter: brightness(1); opacity: 1; }
+            50%   { transform: scale(1, 0.005); filter: brightness(10); opacity: 1; }
+            99%   { transform: scale(0, 0.005); filter: brightness(50); opacity: 1; }
+            100% { transform: scale(0, 0); opacity: 0; }
+        }
+
+        /* album art background */
+        .art-bg {
+            position: absolute;
+            inset: -40px; /* slight overflow for blur room */
+            background-size: cover;
+            background-position: center;
+            filter: blur(30px) brightness(0.25);
+            z-index: 0;
+        }
+        .art-fg {
+            position: relative;
+            z-index: 1;
+            max-width: 65vw;
+            max-height: 65vh;
+            object-fit: contain;
+            border-radius: 8px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.5);
+        }
+
+        /* scanlines */
+        .scanlines {
+            position: absolute;
+            inset: 0;
+            pointer-events: none;
+            z-index: 2;
+            background: repeating-linear-gradient(
+                rgba(0,0,0,0) 0px,
+                rgba(0,0,0,0) 2px,
+                rgba(0,0,0,0.15) 2px,
+                rgba(0,0,0,0.15) 4px
+            );
+        }
+
+        /* static noise */
+        .static-noise {
+            position: absolute;
+            inset: 0;
+            z-index: 3;
+            pointer-events: none;
+            background: repeating-radial-gradient(#111 0 0.0001%, #222 0 0.0002%) 50% 50% / 2500px 2500px;
+            opacity: 0;
+            transition: opacity 0.15s;
+            mix-blend-mode: overlay;
+        }
+        .static-noise.active {
+            opacity: 0.7;
+            animation: noise-shift 0.2s infinite;
+        }
+        @keyframes noise-shift {
+            0% { background-position: 0 0; }
+            100% { background-position: 100px 100px; }
+        }
+
+        /* ── top bar ────────────────────────────────────────────── */
+        .top-bar {
+            position: absolute;
+            top: 16px;
+            left: 50%;
+            transform: translateX(-50%);
+            z-index: 10;
+            display: flex;
+            gap: 20px;
+            align-items: center;
+            padding: 8px 24px;
+        }
+        .top-bar .clock {
+            font-size: 15px;
+            font-weight: 500;
+            letter-spacing: 1px;
+            color: var(--text);
+        }
+        .top-bar .signal {
+            font-size: 12px;
+            font-weight: 400;
+            color: var(--text-dim);
+            letter-spacing: 2px;
+            text-transform: uppercase;
+        }
+        .signal-dot {
+            display: inline-block;
+            width: 6px; height: 6px;
+            border-radius: 50%;
+            margin-right: 6px;
+            background: #666;
+            transition: background 0.3s;
+        }
+        .signal-dot.locked { background: #4f8; box-shadow: 0 0 6px rgba(68,255,136,0.6); }
+        .signal-dot.searching { background: var(--accent); box-shadow: 0 0 6px var(--accent-glow); animation: pulse 0.6s infinite; }
+        @keyframes pulse {
+            0%,100% { opacity: 1; }
+            50% { opacity: 0.3; }
+        }
+
+        /* ── bottom song info ───────────────────────────────────── */
+        .song-bar {
+            position: absolute;
+            bottom: 120px;
+            left: 50%;
+            transform: translateX(-50%);
+            z-index: 10;
+            padding: 10px 28px;
+            max-width: 80vw;
+            overflow: hidden;
+        }
+        .song-title {
+            font-size: 16px;
+            font-weight: 500;
+            white-space: nowrap;
+            color: var(--text);
+        }
+        .song-title.scroll {
+            animation: marquee 14s linear infinite;
+        }
+        @keyframes marquee {
+            0%   { transform: translateX(0); }
+            100% { transform: translateX(-50%); }
+        }
+
+        /* ── controls tray (bottom) ─────────────────────────────── */
+        .controls {
+            position: absolute;
+            bottom: 24px;
+            left: 50%;
+            transform: translateX(-50%);
+            z-index: 10;
+            display: flex;
+            gap: 16px;
+            align-items: flex-end;
+            padding: 16px 24px;
+        }
+        .ctl-group {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 8px;
+            min-width: 80px;
+        }
+        .ctl-label {
+            font-size: 10px;
+            text-transform: uppercase;
+            letter-spacing: 2px;
+            color: var(--text-dim);
+        }
+        .freq-display {
+            font-size: 22px;
+            font-weight: 600;
+            color: var(--text);
+            letter-spacing: 1px;
+            min-width: 70px;
+            text-align: center;
+        }
+        .freq-display .unit {
+            font-size: 12px;
+            font-weight: 400;
+            color: var(--text-dim);
+        }
+
+        /* ── sliders ────────────────────────────────────────────── */
+        input[type="range"] {
+            -webkit-appearance: none;
+            appearance: none;
+            width: 160px;
+            height: 4px;
+            border-radius: 2px;
+            background: rgba(255,255,255,0.12);
+            outline: none;
+            cursor: pointer;
+        }
+        input[type="range"]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            appearance: none;
+            width: 16px;
+            height: 16px;
+            border-radius: 50%;
+            background: var(--accent);
+            border: 2px solid var(--bg);
+            box-shadow: 0 0 12px var(--accent-glow);
+            cursor: pointer;
+            transition: transform 0.1s;
+        }
+        input[type="range"]::-webkit-slider-thumb:active {
+            transform: scale(1.2);
+        }
+
+        #volumeSlider {
+            width: 100px;
+        }
+
+        /* ── power button ───────────────────────────────────────── */
+        .power-btn {
+            width: 44px; height: 44px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            transition: all 0.25s;
+            font-size: 18px;
+            color: var(--text-dim);
+        }
+        .power-btn:hover {
+            border-color: rgba(255,255,255,0.2);
+            color: var(--text);
+        }
+        body.power-on .power-btn {
+            color: var(--accent);
+            box-shadow: 0 0 20px var(--accent-glow);
+            border-color: rgba(240,160,64,0.3);
+        }
+
+        /* ── power-off overlay ──────────────────────────────────── */
+        .power-hint {
+            position: absolute;
+            inset: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 20;
+            pointer-events: none;
+            opacity: 0;
+            transition: opacity 0.4s;
+        }
+        body:not(.power-on) .power-hint {
+            opacity: 1;
+        }
+        .power-hint span {
+            font-size: 13px;
+            letter-spacing: 3px;
+            color: var(--text-dim);
+        }
+
+        /* ── fullscreen button ──────────────────────────────────── */
+        .fs-btn {
+            width: 36px; height: 36px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            font-size: 14px;
+            color: var(--text-dim);
+            transition: color 0.2s;
+        }
+        .fs-btn:hover { color: var(--text); }
+
+        /* ── hidden audio elements ──────────────────────────────── */
+        audio { display: none; }
+    </style>
+</head>
+<body>
+
+    <!-- ── CRT screen ──────────────────────────────────────────── -->
+    <div class="crt-screen" id="crtScreen">
+        <div class="art-bg" id="artBg"></div>
+        <img class="art-fg" id="artFg" src="" alt="" />
+        <div class="scanlines"></div>
+        <div class="static-noise" id="staticNoise"></div>
+    </div>
+
+    <!-- ── power-off hint ──────────────────────────────────────── -->
+    <div class="power-hint"><span>PRESS ⏻ TO START</span></div>
+
+    <!-- ── top bar ─────────────────────────────────────────────── -->
+    <div class="top-bar glass" id="topBar">
+        <span class="clock" id="clockDisplay">00:00</span>
+        <span class="signal">
+            <span class="signal-dot" id="signalDot"></span>
+            <span id="signalText">NO SIGNAL</span>
+        </span>
+    </div>
+
+    <!-- ── song info ───────────────────────────────────────────── -->
+    <div class="song-bar glass" id="songBar">
+        <div class="song-title" id="songTitle">— STANDBY —</div>
+    </div>
+
+    <!-- ── controls ────────────────────────────────────────────── -->
+    <div class="controls glass" id="controlsBar">
+        <!-- power -->
+        <div class="ctl-group">
+            <div class="power-btn glass" id="powerBtn" title="Power">⏻</div>
+            <div class="ctl-label">Power</div>
+        </div>
+
+        <!-- tuner -->
+        <div class="ctl-group">
+            <div class="freq-display"><span id="freqValue">--.-</span><span class="unit">MHz</span></div>
+            <input type="range" min="875" max="1080" value="885" id="tunerSlider" />
+            <div class="ctl-label">Tune</div>
+        </div>
+
+        <!-- volume -->
+        <div class="ctl-group">
+            <input type="range" min="0" max="100" value="65" id="volumeSlider" />
+            <div class="ctl-label">Volume</div>
+        </div>
+
+        <!-- fullscreen -->
+        <div class="ctl-group">
+            <div class="fs-btn glass" id="fsBtn" title="Fullscreen">⛶</div>
+            <div class="ctl-label">Full</div>
+        </div>
+    </div>
+
+    <!-- ── audio pool ──────────────────────────────────────────── -->
+    <audio id="audioA" preload="auto"></audio>
+    <audio id="audioB" preload="auto"></audio>
+
+    <script>
+    /* ═══════════════════════════════════════════════════════════════
+       Lo-Fi Radio – flat design + glassmorphism + CRT beam collapse
+       ═══════════════════════════════════════════════════════════════ */
+
+    // ── DOM refs ───────────────────────────────────────────────────
+    const $ = id => document.getElementById(id);
+    const body = document.body;
+    const crtScreen  = $("crtScreen");
+    const artBg      = $("artBg");
+    const artFg      = $("artFg");
+    const staticN    = $("staticNoise");
+    const clockDisp  = $("clockDisplay");
+    const signalDot  = $("signalDot");
+    const signalText = $("signalText");
+    const songTitle  = $("songTitle");
+    const freqValue  = $("freqValue");
+    const tunerSlider = $("tunerSlider");
+    const volumeSlider = $("volumeSlider");
+    const powerBtn   = $("powerBtn");
+    const fsBtn      = $("fsBtn");
+    const audioA     = $("audioA");
+    const audioB     = $("audioB");
+
+    // ── state ─────────────────────────────────────────────────────
+    let poweredOn     = false;
+    let musicList     = [];        // [{sha256, title}, ...]
+    let imageList     = [];        // [{sha256}, ...]
+    let playlist      = [];        // current shuffled order (indices into musicList)
+    let playlistIdx   = 0;
+    let activeAudio   = audioA;    // currently playing
+    let standbyAudio  = audioB;    // for pre-fetch
+    let prefetchDone  = false;
+    let tuneTimer     = null;
+
+    // ── seeded PRNG (mulberry32) ──────────────────────────────────
+    function mulberry32(seed) {
+        return function() {
+            seed |= 0;
+            seed = seed + 0x6D2B79F5 | 0;
+            let t = Math.imul(seed ^ seed >>> 15, 1 | seed);
+            t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+            return ((t ^ t >>> 14) >>> 0) / 4294967296;
+        };
+    }
+
+    function seededShuffle(arr, seed) {
+        const rng = mulberry32(seed);
+        const a = [...arr];
+        for (let i = a.length - 1; i > 0; i--) {
+            const j = Math.floor(rng() * (i + 1));
+            [a[i], a[j]] = [a[j], a[i]];
+        }
+        return a;
+    }
+
+    // ── clock ─────────────────────────────────────────────────────
+    function tick() {
+        const n = new Date();
+        clockDisp.textContent =
+            String(n.getHours()).padStart(2, "0") + ":" +
+            String(n.getMinutes()).padStart(2, "0");
+    }
+    setInterval(tick, 1000);
+    tick();
+
+    // ── helpers ───────────────────────────────────────────────────
+    function setSignal(state) {
+        signalDot.className = "signal-dot " + state;
+        if (state === "locked")      signalText.textContent = "STEREO LOCKED";
+        else if (state === "searching") signalText.textContent = "TUNING...";
+        else                         signalText.textContent = "NO SIGNAL";
+    }
+
+    function showArt() {
+        if (imageList.length === 0) return;
+        const img = imageList[Math.floor(Math.random() * imageList.length)];
+        const url = "/image/" + img.sha256;
+        artFg.src = url;
+        artBg.style.backgroundImage = `url(${url})`;
+    }
+
+    function setSongInfo(title) {
+        const t = title + "   —   Lo-Fi Radio   ★   " + title + "   —   Lo-Fi Radio   ★   ";
+        songTitle.textContent = t;
+        songTitle.classList.add("scroll");
+    }
+
+    function volume() {
+        const v = parseInt(volumeSlider.value) / 100;
+        audioA.volume = v;
+        audioB.volume = v;
+    }
+
+    // ── playlist management ───────────────────────────────────────
+    function buildPlaylist(seed) {
+        if (musicList.length === 0) return;
+        playlist = seededShuffle(
+            musicList.map((_, i) => i),  // array of indices
+            seed
+        );
+        playlistIdx = 0;
+        prefetchDone = false;
+    }
+
+    function currentTrack() {
+        if (playlist.length === 0) return null;
+        return musicList[playlist[playlistIdx]];
+    }
+
+    function nextTrack() {
+        if (playlist.length === 0) return null;
+        playlistIdx = (playlistIdx + 1) % playlist.length;
+        return currentTrack();
+    }
+
+    // ── audio engine ──────────────────────────────────────────────
+    function loadAndPlay(track) {
+        if (!track) return;
+        // stop both
+        audioA.pause(); audioA.src = "";
+        audioB.pause(); audioB.src = "";
+        // play on active
+        activeAudio = audioA;
+        standbyAudio = audioB;
+        activeAudio.src = "/music/" + track.sha256;
+        activeAudio.load();
+        activeAudio.play().catch(() => {});
+        prefetchDone = false;
+        setSongInfo(track.title);
+        showArt();
+        setSignal("locked");
+        staticN.classList.remove("active");
+    }
+
+    function prefetchNext() {
+        if (prefetchDone) return;
+        const next = nextTrack();
+        if (!next) return;
+        // Advance playlistIdx back since nextTrack() already moved it
+        playlistIdx = (playlistIdx - 1 + playlist.length) % playlist.length;
+
+        const realNext = musicList[playlist[(playlistIdx + 1) % playlist.length]];
+        standbyAudio.src = "/music/" + realNext.sha256;
+        standbyAudio.load();
+        prefetchDone = true;
+    }
+
+    function advanceTrack() {
+        const track = nextTrack();
+        if (!track) return;
+        // swap active/standby
+        if (prefetchDone && standbyAudio.src) {
+            // Use the pre-fetched audio
+            activeAudio.pause();
+            activeAudio.src = "";
+            [activeAudio, standbyAudio] = [standbyAudio, activeAudio];
+            activeAudio.play().catch(() => {});
+        } else {
+            loadAndPlay(track);
+            return;
+        }
+        prefetchDone = false;
+        setSongInfo(track.title);
+        showArt();
+    }
+
+    // time-update handler: pre-fetch next 10 s before end
+    function onTimeUpdate() {
+        if (!poweredOn || prefetchDone) return;
+        if (activeAudio.duration && activeAudio.duration - activeAudio.currentTime <= 10) {
+            prefetchNext();
+        }
+    }
+
+    function onEnded() {
+        if (!poweredOn) return;
+        advanceTrack();
+    }
+
+    audioA.addEventListener("timeupdate", onTimeUpdate);
+    audioB.addEventListener("timeupdate", onTimeUpdate);
+    audioA.addEventListener("ended", onEnded);
+    audioB.addEventListener("ended", onEnded);
+
+    // ── tuning ────────────────────────────────────────────────────
+    function doTune() {
+        if (!poweredOn || musicList.length === 0) return;
+        const seed = parseInt(tunerSlider.value);  // 875–1080, direct seed
+        buildPlaylist(seed);
+        const track = currentTrack();
+        if (track) loadAndPlay(track);
+    }
+
+    tunerSlider.addEventListener("input", () => {
+        if (!poweredOn) return;
+        const v = parseInt(tunerSlider.value);
+        freqValue.textContent = (v / 10).toFixed(1);
+
+        // pause immediately
+        audioA.pause();
+        audioB.pause();
+        standbyAudio.src = "";
+        prefetchDone = false;
+
+        // show tuning effect
+        staticN.classList.add("active");
+        setSignal("searching");
+        songTitle.textContent = "· · · · · ·";
+        songTitle.classList.remove("scroll");
+
+        // debounce
+        clearTimeout(tuneTimer);
+        tuneTimer = setTimeout(doTune, 600);
+    });
+
+    // ── power ─────────────────────────────────────────────────────
+    async function powerOn() {
+        poweredOn = true;
+        body.className = "power-on";
+
+        // fetch data from backend
+        try {
+            const [ml, il] = await Promise.all([
+                fetch("/musiclist").then(r => r.json()),
+                fetch("/imagelist").then(r => r.json()),
+            ]);
+            musicList = ml;
+            imageList = il;
+        } catch (e) {
+            console.error("Failed to fetch media indexes", e);
+            musicList = [];
+            imageList = [];
+        }
+
+        if (musicList.length === 0) {
+            setSignal("");
+            signalText.textContent = "NO MUSIC FOUND";
+            return;
+        }
+
+        // initial tune
+        const seed = parseInt(tunerSlider.value);
+        freqValue.textContent = (seed / 10).toFixed(1);
+        buildPlaylist(seed);
+        const track = currentTrack();
+        if (track) {
+            // wait for CRT animation before playing
+            const delay = parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--crt-speed")) * 1000 + 300;
+            setTimeout(() => loadAndPlay(track), delay);
+        }
+    }
+
+    function powerOff() {
+        poweredOn = false;
+        body.className = "power-off";
+        audioA.pause(); audioA.src = "";
+        audioB.pause(); audioB.src = "";
+        staticN.classList.remove("active");
+        prefetchDone = false;
+        setSignal("");
+        songTitle.textContent = "— STANDBY —";
+        songTitle.classList.remove("scroll");
+        freqValue.textContent = "--.-";
+        clearTimeout(tuneTimer);
+
+        // clear art after collapse animation
+        const delay = parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--crt-speed")) * 1000 + 200;
+        setTimeout(() => {
+            artFg.src = "";
+            artBg.style.backgroundImage = "";
+        }, delay);
+    }
+
+    powerBtn.addEventListener("click", () => {
+        if (poweredOn) powerOff();
+        else powerOn();
+    });
+
+    // ── volume slider ─────────────────────────────────────────────
+    volumeSlider.addEventListener("input", volume);
+    volume(); // init
+
+    // ── fullscreen ────────────────────────────────────────────────
+    fsBtn.addEventListener("click", () => {
+        if (!document.fullscreenElement) {
+            document.documentElement.requestFullscreen().catch(() => {});
+        } else {
+            document.exitFullscreen();
+        }
+    });
+
+    // ── keyboard shortcuts ────────────────────────────────────────
+    document.addEventListener("keydown", e => {
+        if (e.key === " " || e.code === "Space") {
+            e.preventDefault();
+            powerBtn.click();
+        }
+        if (e.key === "f" && !e.ctrlKey && !e.metaKey) {
+            fsBtn.click();
+        }
+    });
+    </script>
+</body>
+</html>
