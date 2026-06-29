@@ -303,20 +303,12 @@
             z-index: 10;
             padding: 10px 28px;
             max-width: 80vw;
-            overflow: hidden;
         }
         .song-title {
             font-size: 16px;
             font-weight: 500;
             white-space: nowrap;
             color: var(--text);
-        }
-        .song-title.scroll {
-            animation: marquee 14s linear infinite;
-        }
-        @keyframes marquee {
-            0%   { transform: translateX(0); }
-            100% { transform: translateX(-50%); }
         }
 
         /* ── controls tray (floating at bottom) ─────────────────── */
@@ -768,9 +760,7 @@
     }
 
     function setSongInfo(title) {
-        const t = title + "   —   Lo-Fi Radio   ★   " + title + "   —   Lo-Fi Radio   ★   ";
-        songTitle.textContent = t;
-        songTitle.classList.add("scroll");
+        songTitle.textContent = title;
     }
 
     function volume() {
@@ -984,7 +974,6 @@
         staticN.classList.add("active");
         setSignal("searching");
         songTitle.textContent = "· · · · · ·";
-        songTitle.classList.remove("scroll");
 
         // debounce
         clearTimeout(tuneTimer);
@@ -1040,7 +1029,6 @@
         prefetchDone = false;
         setSignal("");
         songTitle.textContent = "— STANDBY —";
-        songTitle.classList.remove("scroll");
         freqValue.textContent = "--.-";
         clearTimeout(tuneTimer);
 
