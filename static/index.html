@@ -361,8 +361,43 @@
             transform: scale(1.2);
         }
 
-        #volumeSlider {
-            width: 100px;
+        #tunerSlider {
+            width: 280px;
+        }
+
+        /* ── volume popup ────────────────────────────────────────── */
+        .vol-popup {
+            position: absolute;
+            bottom: 56px;
+            left: 50%;
+            transform: translateX(-50%) translateY(8px);
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity 0.2s ease, transform 0.2s ease;
+            padding: 12px 16px;
+        }
+        .vol-popup.open {
+            opacity: 1;
+            pointer-events: auto;
+            transform: translateX(-50%) translateY(0);
+        }
+        .vol-popup input[type="range"] {
+            width: 120px;
+        }
+        .vol-btn {
+            width: 40px; height: 40px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            transition: all 0.25s;
+            font-size: 18px;
+            color: var(--text-dim);
+        }
+        .vol-btn:hover {
+            border-color: rgba(255,255,255,0.2);
+            color: var(--text);
         }
 
         /* ── power button ───────────────────────────────────────── */
@@ -596,8 +631,11 @@
         </div>
 
         <!-- volume -->
-        <div class="ctl-group">
-            <input type="range" min="0" max="100" value="65" id="volumeSlider" />
+        <div class="ctl-group" style="position:relative;">
+            <div class="vol-btn glass" id="volBtn" title="Volume">🔊</div>
+            <div class="vol-popup glass" id="volPopup">
+                <input type="range" min="0" max="100" value="65" id="volumeSlider" />
+            </div>
             <div class="ctl-label">Volume</div>
         </div>
 
@@ -665,6 +703,8 @@
     const freqValue  = $("freqValue");
     const tunerSlider = $("tunerSlider");
     const volumeSlider = $("volumeSlider");
+    const volBtn       = $("volBtn");
+    const volPopup     = $("volPopup");
     const powerBtn   = $("powerBtn");
     const fsBtn      = $("fsBtn");
     const audioA     = $("audioA");
@@ -743,6 +783,12 @@
         const v = parseInt(volumeSlider.value) / 100;
         audioA.volume = v;
         audioB.volume = v;
+        // update icon
+        const pct = parseInt(volumeSlider.value);
+        if (pct >= 50)      volBtn.textContent = "🔊";
+        else if (pct >= 20) volBtn.textContent = "🔉";
+        else if (pct > 0)   volBtn.textContent = "🔈";
+        else                volBtn.textContent = "🔇";
     }
 
     // ── playlist management ───────────────────────────────────────
@@ -1017,9 +1063,19 @@
         else powerOn();
     });
 
-    // ── volume slider ─────────────────────────────────────────────
+    // ── volume slider + popup ────────────────────────────────────
     volumeSlider.addEventListener("input", volume);
     volume(); // init
+
+    volBtn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        volPopup.classList.toggle("open");
+    });
+    document.addEventListener("click", (e) => {
+        if (!volPopup.contains(e.target) && e.target !== volBtn) {
+            volPopup.classList.remove("open");
+        }
+    });
 
     // ── fullscreen ────────────────────────────────────────────────
     fsBtn.addEventListener("click", () => {
