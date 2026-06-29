@@ -80,6 +80,7 @@
             width: 33vw;
             min-width: 280px;
             z-index: 99;
+            border-radius: 0;
             transform: translateX(-100%);
             transition: transform 0.35s ease;
             display: flex;
@@ -294,24 +295,7 @@
             50% { opacity: 0.3; }
         }
 
-        /* ── bottom song info ───────────────────────────────────── */
-        .song-bar {
-            position: absolute;
-            bottom: 100px;
-            left: 50%;
-            transform: translateX(-50%);
-            z-index: 10;
-            padding: 10px 28px;
-            max-width: 80vw;
-        }
-        .song-title {
-            font-size: 16px;
-            font-weight: 500;
-            white-space: nowrap;
-            color: var(--text);
-        }
-
-        /* ── controls tray (floating at bottom) ─────────────────── */
+/* ── controls tray (floating at bottom) ─────────────────── */
         .controls {
             position: absolute;
             bottom: 24px;
@@ -596,11 +580,7 @@
     </div>
 
     <!-- ── song info ───────────────────────────────────────────── -->
-    <div class="song-bar glass" id="songBar">
-        <div class="song-title" id="songTitle">— STANDBY —</div>
-    </div>
-
-    <!-- ── controls (floating) ─────────────────────────────────── -->
+<!-- ── controls (floating) ─────────────────────────────────── -->
     <div class="controls glass" id="controlsBar">
         <!-- power -->
         <div class="ctl-group">
@@ -682,7 +662,6 @@
     const clockDisp  = $("clockDisplay");
     const signalDot  = $("signalDot");
     const signalText = $("signalText");
-    const songTitle  = $("songTitle");
     const freqValue  = $("freqValue");
     const tunerSlider = $("tunerSlider");
     const volumeSlider = $("volumeSlider");
@@ -759,9 +738,6 @@
         artBg.style.backgroundImage = `url(${url})`;
     }
 
-    function setSongInfo(title) {
-        songTitle.textContent = title;
-    }
 
     function volume() {
         const v = parseInt(volumeSlider.value) / 100;
@@ -804,7 +780,6 @@
         activeAudio.load();
         activeAudio.play().catch(() => {});
         prefetchDone = false;
-        setSongInfo(track.title);
         showArt();
         setSignal("locked");
         staticN.classList.remove("active");
@@ -838,7 +813,6 @@
             return;
         }
         prefetchDone = false;
-        setSongInfo(track.title);
         showArt();
     }
 
@@ -973,7 +947,6 @@
         // show tuning effect
         staticN.classList.add("active");
         setSignal("searching");
-        songTitle.textContent = "· · · · · ·";
 
         // debounce
         clearTimeout(tuneTimer);
@@ -1028,8 +1001,6 @@
         staticN.classList.remove("active");
         prefetchDone = false;
         setSignal("");
-        songTitle.textContent = "— STANDBY —";
-        freqValue.textContent = "--.-";
         clearTimeout(tuneTimer);
 
         // clear art & show power hint after collapse animation
