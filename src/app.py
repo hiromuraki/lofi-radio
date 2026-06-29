@@ -1,9 +1,13 @@
+import asyncio
 import hashlib
+import json
+import uuid
 from contextlib import asynccontextmanager
+from datetime import datetime, timezone
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException
-from fastapi.responses import FileResponse
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -12,6 +16,16 @@ DATA_DIR = BASE_DIR / "data"
 # ── in-memory indexes ──────────────────────────────────────────────
 image_index: dict[str, Path] = {}  # {sha256: path}
 music_index: dict[str, dict] = {}  # {sha256: {"path": ..., "title": ...}}
+
+# ── chat state ────────────────────────────────────────────────────
+chat_messages: list[dict] = []         # all messages (keep all in memory)
+sse_queues: list[asyncio.Queue] = []   # one queue per connected SSE client
+
+
+async def _chat_broadcast(msg: dict) -> None:
+    """Push *msg* to every connected SSE client."""
+    for q in sse_queues:
+        await q.put(msg)
 
 
 def _sha256(filepath: Path) -> str:
@@ -82,6 +96,62 @@ async def image_file(sha256: str):
     if fp is None:
         raise HTTPException(status_code=404, detail="Image not found")
     return FileResponse(fp)
+
+
+# ── chat routes ───────────────────────────────────────────────────
+
+@app.post("/chat/send")
+async def chat_send(req: Request):
+    """Receive a chat message and broadcast it via SSE."""
+    body = await req.json()
+    content = (body.get("content") or "").strip()
+    if not content or len(content) > 256:
+        raise HTTPException(status_code=400, detail="Content must be 1–256 characters")
+    msg = {
+        "id": str(uuid.uuid4()),
+        "content": content,
+        "sender_ip": req.client.host if req.client else "unknown",
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    }
+    chat_messages.append(msg)
+    await _chat_broadcast(msg)
+    return {"ok": True}
+
+
+@app.get("/chat/whoami")
+async def chat_whoami(req: Request):
+    """Return the client's IP as seen by the server."""
+    return {"ip": req.client.host if req.client else "unknown"}
+
+
+@app.get("/chat/stream")
+async def chat_stream():
+    """SSE endpoint — pushes last 10 messages, then live messages."""
+
+    async def _event_stream():
+        queue: asyncio.Queue = asyncio.Queue()
+        sse_queues.append(queue)
+        try:
+            # Replay last 10 messages on connect
+            for msg in chat_messages[-10:]:
+                yield f"data: {json.dumps(msg)}\n\n"
+            # Stream live messages
+            while True:
+                msg = await queue.get()
+                yield f"data: {json.dumps(msg)}\n\n"
+        except asyncio.CancelledError:
+            pass
+        finally:
+            sse_queues.remove(queue)
+
+    return StreamingResponse(
+        _event_stream(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 # ── static files (must be mounted last so API routes take priority) ─
 
