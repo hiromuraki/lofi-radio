@@ -137,12 +137,10 @@
 
         /* ── CRT content: beam-collapse animation target ──────────── */
         .crt-content {
+            position: relative;
             width: 100%;
             height: 100%;
             background-color: #0c0c18;   /* essential: brightness() filter needs pixels to amplify */
-            display: flex;
-            align-items: center;
-            justify-content: center;
             /* initial state: fully collapsed (matches old screen-animator) */
             opacity: 0;
             transform: scale(0, 0);
@@ -166,14 +164,22 @@
             100% { transform: scale(0, 0); opacity: 0; }
         }
 
-        /* album art background (inside crt-content) */
+        /* ── full-bleed dynamic background ─────────────────────────── */
         .art-bg {
             position: absolute;
             inset: 0;
             background-size: cover;
             background-position: center;
-            filter: blur(20px) brightness(0.35);
             z-index: 0;
+        }
+        /* ── dark glass overlay ────────────────────────────────────── */
+        .bg-overlay {
+            position: absolute;
+            inset: 0;
+            z-index: 1;
+            background: rgba(8, 8, 15, 0.55);
+            backdrop-filter: blur(20px) saturate(0.8);
+            -webkit-backdrop-filter: blur(20px) saturate(0.8);
         }
         .art-fg {
             position: relative;
@@ -185,12 +191,41 @@
             box-shadow: 0 20px 60px rgba(0,0,0,0.5);
         }
 
+        /* ── 3-column layout ────────────────────────────────────────── */
+        .layout-3col {
+            position: relative;
+            z-index: 2;
+            display: flex;
+            flex-direction: row;
+            width: 100%;
+            height: 100%;
+        }
+        .col-left {
+            width: 260px;
+            flex-shrink: 0;
+        }
+        .col-center {
+            flex: 1;
+            min-width: 0;
+            position: relative;
+            overflow: hidden;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .col-right {
+            width: 260px;
+            flex-shrink: 0;
+            display: flex;
+            flex-direction: column;
+        }
+
         /* scanlines */
         .scanlines {
             position: absolute;
             inset: 0;
             pointer-events: none;
-            z-index: 2;
+            z-index: 5;
             background: repeating-linear-gradient(
                 rgba(0,0,0,0) 0px,
                 rgba(0,0,0,0) 2px,
@@ -203,7 +238,7 @@
         .static-noise {
             position: absolute;
             inset: 0;
-            z-index: 3;
+            z-index: 6;
             pointer-events: none;
             background: repeating-radial-gradient(#111 0 0.0001%, #222 0 0.0002%) 50% 50% / 2500px 2500px;
             opacity: 0;
@@ -410,16 +445,12 @@
         }
         .fs-btn:hover { color: var(--text); }
 
-        /* ── chat (bubble style, floating overlay) ─────────────── */
+        /* ── chat panel (embedded in right column) ────────────────── */
         .chat-panel {
-            position: absolute;
-            right: 12px;
-            top: 68px;
-            bottom: 100px;
-            width: 260px;
-            z-index: 10;
+            flex: 1;
             display: flex;
             flex-direction: column;
+            padding: 68px 12px 100px;
             background: none;
             border: none;
             border-radius: 0;
@@ -531,8 +562,30 @@
     <!-- ── CRT screen (full viewport) ──────────────────────────── -->
     <div class="crt-bezel" id="crtBezel">
         <div class="crt-content" id="crtContent">
+            <!-- Full-bleed dynamic background -->
             <div class="art-bg" id="artBg"></div>
-            <img class="art-fg" id="artFg" src="" alt="" />
+            <!-- Dark glass overlay -->
+            <div class="bg-overlay"></div>
+            <!-- 3-column logical layout (transparent, visually integrated) -->
+            <div class="layout-3col">
+                <div class="col-left"></div>
+                <div class="col-center">
+                    <img class="art-fg" id="artFg" src="" alt="" />
+                </div>
+                <div class="col-right">
+                    <div class="chat-panel" id="chatPanel">
+                        <div class="chat-messages" id="chatMessages">
+                            <div class="chat-empty">No messages yet</div>
+                        </div>
+                        <div class="chat-input-row">
+                            <input type="text" class="chat-input" id="chatInput"
+                                   maxlength="256" placeholder="Type a message..." />
+                            <button class="chat-send-btn" id="chatSendBtn" title="Send">→</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <!-- CRT effects (above content) -->
             <div class="scanlines"></div>
             <div class="static-noise" id="staticNoise"></div>
         </div>
@@ -618,17 +671,6 @@
         <div class="panel-hint">— API coming soon —</div>
     </div>
 
-    <!-- ── chat panel (floating overlay) ───────────────────────── -->
-    <div class="chat-panel" id="chatPanel">
-        <div class="chat-messages" id="chatMessages">
-            <div class="chat-empty">No messages yet</div>
-        </div>
-        <div class="chat-input-row">
-            <input type="text" class="chat-input" id="chatInput"
-                   maxlength="256" placeholder="Type a message..." />
-            <button class="chat-send-btn" id="chatSendBtn" title="Send">→</button>
-        </div>
-    </div>
 
     <!-- ── audio pool ──────────────────────────────────────────── -->
     <audio id="audioA" preload="auto"></audio>
