@@ -126,14 +126,14 @@ async def chat_whoami(req: Request):
 
 @app.get("/chat/stream")
 async def chat_stream():
-    """SSE endpoint — pushes last 10 messages, then live messages."""
+    """SSE endpoint — pushes last 5 messages, then live messages."""
 
     async def _event_stream():
         queue: asyncio.Queue = asyncio.Queue()
         sse_queues.append(queue)
         try:
-            # Replay last 10 messages on connect
-            for msg in chat_messages[-10:]:
+            # Replay last 5 messages on connect
+            for msg in chat_messages[-5:]:
                 yield f"data: {json.dumps(msg)}\n\n"
             # Stream live messages
             while True:

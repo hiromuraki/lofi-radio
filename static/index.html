@@ -219,6 +219,7 @@
             flex-shrink: 0;
             display: flex;
             flex-direction: column;
+            justify-content: center;
         }
 
         /* scanlines */
@@ -553,10 +554,11 @@
 
         /* ── chat panel (embedded in right column) ────────────────── */
         .chat-panel {
-            flex: 1;
             display: flex;
             flex-direction: column;
-            padding: 68px 12px 100px;
+            height: 65vh;
+            width: 100%;
+            padding: 0 12px;
             background: none;
             border: none;
             border-radius: 0;
@@ -568,7 +570,9 @@
             pointer-events: auto;
         }
         .chat-messages {
-            flex: 1;
+            flex: 1 1 0;
+            min-height: 0;
+            max-height: 60vh;
             overflow-y: auto;
             padding: 8px 6px;
             display: flex;
@@ -579,6 +583,13 @@
             /* thin scrollbar */
             scrollbar-width: thin;
             scrollbar-color: rgba(255,255,255,0.08) transparent;
+        }
+        /* spring: pushes messages to bottom when they don't fill container,
+           shrinks to 0 when overflowing so scrollbar works */
+        .chat-messages::before {
+            content: '';
+            flex: 1 1 0;
+            min-height: 0;
         }
         .chat-msg {
             padding: 7px 12px;
@@ -1020,7 +1031,7 @@
             try {
                 const msg = JSON.parse(e.data);
                 chatMsgList.push(msg);
-                if (chatMsgList.length > 20) chatMsgList = chatMsgList.slice(-20);
+                if (chatMsgList.length > 5) chatMsgList = chatMsgList.slice(-5);
                 renderChat();
             } catch (_) { /* ignore malformed */ }
         };
