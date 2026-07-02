@@ -10,6 +10,8 @@ from pathlib import Path
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
+from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.types import Scope
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 DATA_DIR = Path(os.environ.get("DATA_DIR", "/data"))
@@ -63,6 +65,25 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="Lo-Fi Radio", lifespan=lifespan)
+
+
+# ── middleware: patch client IP from X-Forwarded-For ──────────────
+class ProxyHeadersFix(BaseHTTPMiddleware):
+    """Read X-Forwarded-For header and patch scope["client"] so
+    req.client.host returns the real client IP even when uvicorn's
+    --proxy-headers flag doesn't work."""
+
+    async def dispatch(self, request: Request, call_next):
+        forwarded = request.headers.get("X-Forwarded-For")
+        if forwarded:
+            # Use the leftmost (original client) IP
+            client_ip = forwarded.split(",")[0].strip()
+            # Patch the ASGI scope in place
+            request.scope["client"] = (client_ip, 0)
+        return await call_next(request)
+
+
+app.add_middleware(ProxyHeadersFix)
 
 # ── API routes (registered BEFORE the static mount) ────────────────
 
@@ -122,7 +143,11 @@ async def chat_send(req: Request):
 @app.get("/chat/whoami")
 async def chat_whoami(req: Request):
     """Return the client's IP as seen by the server."""
-    return {"ip": req.client.host if req.client else "unknown"}
+    return {
+        "ip": req.client.host if req.client else "unknown",
+        "x_forwarded_for": req.headers.get("X-Forwarded-For", "(missing)"),
+        "x_real_ip": req.headers.get("X-Real-IP", "(missing)"),
+    }
 
 
 @app.get("/chat/stream")
