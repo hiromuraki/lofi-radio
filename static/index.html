@@ -552,6 +552,15 @@
         }
         .fs-btn:hover { color: var(--text); }
 
+        /* ── SVG button icons ─────────────────────────────────────── */
+        .btn-icon {
+            width: 20px;
+            height: 20px;
+            pointer-events: none;
+        }
+        .power-btn .btn-icon { width: 22px; height: 22px; }
+        .fs-btn    .btn-icon { width: 16px; height: 16px; }
+
         /* ── chat panel (embedded in right column) ────────────────── */
         .chat-panel {
             display: flex;
@@ -725,7 +734,9 @@
     <div class="controls glass" id="controlsBar">
         <!-- power -->
         <div class="ctl-group">
-            <div class="power-btn glass" id="powerBtn" title="Power">⏻</div>
+            <div class="power-btn glass" id="powerBtn" title="Power">
+                <svg class="btn-icon"><use href="/icons.svg#power"/></svg>
+            </div>
             <div class="ctl-label">Power</div>
         </div>
 
@@ -738,7 +749,9 @@
 
         <!-- volume -->
         <div class="ctl-group ctl-group-vol">
-            <div class="vol-btn glass" id="volBtn" title="Volume">🔊</div>
+            <div class="vol-btn glass" id="volBtn" title="Volume">
+                <svg class="btn-icon"><use href="/icons.svg#volume-high"/></svg>
+            </div>
             <div class="vol-popup glass" id="volPopup">
                 <input type="range" min="0" max="100" value="65" id="volumeSlider" />
             </div>
@@ -747,7 +760,9 @@
 
         <!-- fullscreen -->
         <div class="ctl-group">
-            <div class="fs-btn glass" id="fsBtn" title="Fullscreen">⛶</div>
+            <div class="fs-btn glass" id="fsBtn" title="Fullscreen">
+                <svg class="btn-icon"><use href="/icons.svg#fullscreen"/></svg>
+            </div>
             <div class="ctl-label">Full</div>
         </div>
     </div>
@@ -824,10 +839,9 @@
 
     // ── state ─────────────────────────────────────────────────────
     let poweredOn     = false;
-    let musicList     = [];        // [{sha256, title}, ...]
-    let imageList     = [];        // [{sha256}, ...]
-    let playlist      = [];        // current shuffled order (indices into musicList)
-    let playlistIdx   = 0;
+    let musicList     = [];        // [{sha256, title}, ...] — pre-shuffled by backend
+    let imageList     = [];        // [{sha256}, ...] — pre-shuffled by backend
+    let currentIdx    = 0;         // index into musicList
     let activeAudio   = audioA;    // currently playing
     let standbyAudio  = audioB;    // for pre-fetch
     let prefetchDone  = false;
@@ -836,27 +850,6 @@
     let chatSse       = null;
     let chatMsgList   = [];    // max 20 items displayed
     let myIp          = null;  // own IP from /chat/whoami
-
-    // ── seeded PRNG (mulberry32) ──────────────────────────────────
-    function mulberry32(seed) {
-        return function() {
-            seed |= 0;
-            seed = seed + 0x6D2B79F5 | 0;
-            let t = Math.imul(seed ^ seed >>> 15, 1 | seed);
-            t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
-            return ((t ^ t >>> 14) >>> 0) / 4294967296;
-        };
-    }
-
-    function seededShuffle(arr, seed) {
-        const rng = mulberry32(seed);
-        const a = [...arr];
-        for (let i = a.length - 1; i > 0; i--) {
-            const j = Math.floor(rng() * (i + 1));
-            [a[i], a[j]] = [a[j], a[i]];
-        }
-        return a;
-    }
 
     // ── clock ─────────────────────────────────────────────────────
     function tick() {
@@ -876,9 +869,12 @@
         else                         signalText.textContent = "NO SIGNAL";
     }
 
+    let artIdx = 0;  // cycles through imageList (already shuffled by backend)
+
     function showArt() {
         if (imageList.length === 0) return;
-        const img = imageList[Math.floor(Math.random() * imageList.length)];
+        const img = imageList[artIdx % imageList.length];
+        artIdx++;
         const url = "/image/" + img.sha256;
         artFg.src = url;
         artBg.style.backgroundImage = `url(${url})`;
@@ -898,43 +894,31 @@
         const v = parseInt(volumeSlider.value) / 100;
         audioA.volume = v;
         audioB.volume = v;
-        // update icon
         const pct = parseInt(volumeSlider.value);
-        if (pct >= 50)      volBtn.textContent = "🔊";
-        else if (pct >= 20) volBtn.textContent = "🔉";
-        else if (pct > 0)   volBtn.textContent = "🔈";
-        else                volBtn.textContent = "🔇";
+        const icon = volBtn.querySelector("use");
+        if (!icon) return;
+        if (pct >= 50)      icon.setAttribute("href", "/icons.svg#volume-high");
+        else if (pct >= 20) icon.setAttribute("href", "/icons.svg#volume-medium");
+        else if (pct > 0)   icon.setAttribute("href", "/icons.svg#volume-low");
+        else                icon.setAttribute("href", "/icons.svg#volume-mute");
     }
 
-    // ── playlist management ───────────────────────────────────────
-    function buildPlaylist(seed) {
-        if (musicList.length === 0) return;
-        playlist = seededShuffle(
-            musicList.map((_, i) => i),  // array of indices
-            seed
-        );
-        playlistIdx = 0;
-        prefetchDone = false;
-    }
-
+    // ── track helpers (musicList is pre-shuffled by backend) ──────
     function currentTrack() {
-        if (playlist.length === 0) return null;
-        return musicList[playlist[playlistIdx]];
+        if (musicList.length === 0) return null;
+        return musicList[currentIdx];
     }
 
-    function nextTrack() {
-        if (playlist.length === 0) return null;
-        playlistIdx = (playlistIdx + 1) % playlist.length;
-        return currentTrack();
+    function peekNext() {
+        if (musicList.length === 0) return null;
+        return musicList[(currentIdx + 1) % musicList.length];
     }
 
     // ── audio engine ──────────────────────────────────────────────
     function loadAndPlay(track) {
         if (!track) return;
-        // stop both
         audioA.pause(); audioA.src = "";
         audioB.pause(); audioB.src = "";
-        // play on active
         activeAudio = audioA;
         standbyAudio = audioB;
         activeAudio.src = "/music/" + track.sha256;
@@ -947,31 +931,25 @@
     }
 
     function prefetchNext() {
-        if (prefetchDone) return;
-        const next = nextTrack();
+        if (prefetchDone || musicList.length <= 1) return;
+        const next = peekNext();
         if (!next) return;
-        // Advance playlistIdx back since nextTrack() already moved it
-        playlistIdx = (playlistIdx - 1 + playlist.length) % playlist.length;
-
-        const realNext = musicList[playlist[(playlistIdx + 1) % playlist.length]];
-        standbyAudio.src = "/music/" + realNext.sha256;
+        standbyAudio.src = "/music/" + next.sha256;
         standbyAudio.load();
         prefetchDone = true;
     }
 
     function advanceTrack() {
-        const track = nextTrack();
-        if (!track) return;
-        // swap active/standby
+        if (musicList.length === 0) return;
+        currentIdx = (currentIdx + 1) % musicList.length;
         if (prefetchDone && standbyAudio.src) {
-            // Use the pre-fetched audio
             activeAudio.pause();
             activeAudio.src = "";
             [activeAudio, standbyAudio] = [standbyAudio, activeAudio];
             activeAudio.play().catch(() => {});
         } else {
-            loadAndPlay(track);
-            return;
+            const track = currentTrack();
+            if (track) loadAndPlay(track);
         }
         prefetchDone = false;
         showArt();
@@ -996,6 +974,8 @@
     audioB.addEventListener("ended", onEnded);
 
     // ── chat ──────────────────────────────────────────────────────
+    let lastMsgId = null;    // last received message id, for incremental reconnect
+
     function renderChat() {
         if (chatMsgList.length === 0) {
             chatMessages.innerHTML = '<div class="chat-empty">No messages yet</div>';
@@ -1026,11 +1006,15 @@
         } catch (_) { myIp = null; }
 
         if (chatSse) chatSse.close();
-        chatSse = new EventSource("/chat/stream");
+        const url = lastMsgId ? `/chat/stream?last_id=${encodeURIComponent(lastMsgId)}` : "/chat/stream";
+        chatSse = new EventSource(url);
         chatSse.onmessage = (e) => {
             try {
                 const msg = JSON.parse(e.data);
+                // Dedup: skip if we already have this message
+                if (chatMsgList.some(m => m.id === msg.id)) return;
                 chatMsgList.push(msg);
+                lastMsgId = msg.id;
                 if (chatMsgList.length > 5) chatMsgList = chatMsgList.slice(-5);
                 renderChat();
             } catch (_) { /* ignore malformed */ }
@@ -1045,6 +1029,7 @@
     function disconnectChat() {
         if (chatSse) { chatSse.close(); chatSse = null; }
         chatMsgList = [];
+        lastMsgId = null;
         myIp = null;
         chatMessages.innerHTML = '<div class="chat-empty">No messages yet</div>';
     }
@@ -1086,10 +1071,26 @@
     });
 
     // ── tuning ────────────────────────────────────────────────────
-    function doTune() {
-        if (!poweredOn || musicList.length === 0) return;
-        const seed = parseInt(tunerSlider.value);  // 875–1080, direct seed
-        buildPlaylist(seed);
+    async function doTune() {
+        if (!poweredOn) return;
+        const freq = parseInt(tunerSlider.value);  // 875–1080
+
+        try {
+            const [ml, il] = await Promise.all([
+                fetch(`/musiclist?freq=${freq}`).then(r => r.json()),
+                fetch(`/imagelist?freq=${freq}`).then(r => r.json()),
+            ]);
+            musicList = ml;
+            imageList = il;
+            currentIdx = 0;
+            artIdx = 0;
+            prefetchDone = false;
+            standbyAudio.src = "";
+        } catch (e) {
+            console.error("Tune fetch failed", e);
+            return;
+        }
+
         const track = currentTrack();
         if (track) loadAndPlay(track);
     }
@@ -1100,17 +1101,14 @@
         freqValue.textContent = (v / 10).toFixed(1);
         updateSliderFill(tunerSlider);
 
-        // pause immediately
         audioA.pause();
         audioB.pause();
         standbyAudio.src = "";
         prefetchDone = false;
 
-        // show tuning effect
         staticN.classList.add("active");
         setSignal("searching");
 
-        // debounce
         clearTimeout(tuneTimer);
         tuneTimer = setTimeout(doTune, 600);
     });
@@ -1119,17 +1117,21 @@
     async function powerOn() {
         poweredOn = true;
         body.className = "power-on";
-        powerHint.style.display = "none";  // hide instantly, no transition
+        powerHint.style.display = "none";
         connectChat();
 
-        // fetch data from backend
+        const freq = parseInt(tunerSlider.value);
+        freqValue.textContent = (freq / 10).toFixed(1);
+
         try {
             const [ml, il] = await Promise.all([
-                fetch("/musiclist").then(r => r.json()),
-                fetch("/imagelist").then(r => r.json()),
+                fetch(`/musiclist?freq=${freq}`).then(r => r.json()),
+                fetch(`/imagelist?freq=${freq}`).then(r => r.json()),
             ]);
             musicList = ml;
             imageList = il;
+            currentIdx = 0;
+            artIdx = 0;
         } catch (e) {
             console.error("Failed to fetch media indexes", e);
             musicList = [];
@@ -1142,13 +1144,8 @@
             return;
         }
 
-        // initial tune
-        const seed = parseInt(tunerSlider.value);
-        freqValue.textContent = (seed / 10).toFixed(1);
-        buildPlaylist(seed);
         const track = currentTrack();
         if (track) {
-            // wait for CRT animation before playing
             const delay = parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--crt-speed")) * 1000 + 300;
             setTimeout(() => loadAndPlay(track), delay);
         }
@@ -1160,6 +1157,10 @@
         disconnectChat();
         audioA.pause(); audioA.src = "";
         audioB.pause(); audioB.src = "";
+        musicList = [];
+        imageList = [];
+        currentIdx = 0;
+        artIdx = 0;
         staticN.classList.remove("active");
         prefetchDone = false;
         setSignal("");
@@ -1205,6 +1206,14 @@
     });
 
     // ── fullscreen ────────────────────────────────────────────────
+    const fsIcon = fsBtn.querySelector("use");
+
+    function syncFsIcon() {
+        if (!fsIcon) return;
+        fsIcon.setAttribute("href",
+            document.fullscreenElement ? "/icons.svg#fullscreen-exit" : "/icons.svg#fullscreen");
+    }
+
     fsBtn.addEventListener("click", () => {
         if (!document.fullscreenElement) {
             document.documentElement.requestFullscreen().catch(() => {});
@@ -1212,6 +1221,7 @@
             document.exitFullscreen();
         }
     });
+    document.addEventListener("fullscreenchange", syncFsIcon);
 
     // ── keyboard shortcuts ────────────────────────────────────────
     document.addEventListener("keydown", e => {

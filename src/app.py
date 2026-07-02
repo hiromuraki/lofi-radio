@@ -2,7 +2,9 @@ import asyncio
 import hashlib
 import json
 import os
+import random
 import uuid
+from collections import deque
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from pathlib import Path
@@ -21,8 +23,8 @@ image_index: dict[str, Path] = {}  # {sha256: path}
 music_index: dict[str, dict] = {}  # {sha256: {"path": ..., "title": ...}}
 
 # ── chat state ────────────────────────────────────────────────────
-chat_messages: list[dict] = []         # all messages (keep all in memory)
-sse_queues: list[asyncio.Queue] = []   # one queue per connected SSE client
+chat_messages = deque(maxlen=64)  # latest 64 messages (auto-evict)
+sse_queues: list[asyncio.Queue] = []  # one queue per connected SSE client
 
 
 async def _chat_broadcast(msg: dict) -> None:
@@ -87,19 +89,30 @@ app.add_middleware(ProxyHeadersFix)
 
 # ── API routes (registered BEFORE the static mount) ────────────────
 
+
+MAX_ITEMS = 64
+
+
+def _seeded_sample(population: list, seed: int, k: int = MAX_ITEMS) -> list:
+    """Return a deterministically shuffled sample of up to *k* items."""
+    rng = random.Random(seed)
+    items = list(population)
+    rng.shuffle(items)
+    return items[:k]
+
+
 @app.get("/musiclist")
-async def music_list():
-    """Return all discovered music tracks with their SHA256 hashes."""
-    return [
-        {"sha256": sha, "title": info["title"]}
-        for sha, info in music_index.items()
-    ]
+async def music_list(freq: int = 0):
+    """Return up to 64 music tracks shuffled with *freq* as seed."""
+    entries = [{"sha256": sha, "title": info["title"]} for sha, info in music_index.items()]
+    return _seeded_sample(entries, freq)
 
 
 @app.get("/imagelist")
-async def image_list():
-    """Return all discovered images with their SHA256 hashes."""
-    return [{"sha256": sha} for sha in image_index]
+async def image_list(freq: int = 0):
+    """Return up to 64 images shuffled with *freq* as seed."""
+    entries = [{"sha256": sha} for sha in image_index]
+    return _seeded_sample(entries, freq)
 
 
 @app.get("/music/{sha256}")
@@ -122,6 +135,7 @@ async def image_file(sha256: str):
 
 # ── chat routes ───────────────────────────────────────────────────
 
+
 @app.post("/chat/send")
 async def chat_send(req: Request):
     """Receive a chat message and broadcast it via SSE."""
@@ -136,6 +150,8 @@ async def chat_send(req: Request):
         "timestamp": datetime.now(timezone.utc).isoformat(),
     }
     chat_messages.append(msg)
+    # deque(maxlen=64) auto-evicts oldest on append
+
     await _chat_broadcast(msg)
     return {"ok": True}
 
@@ -151,23 +167,57 @@ async def chat_whoami(req: Request):
 
 
 @app.get("/chat/stream")
-async def chat_stream():
-    """SSE endpoint — pushes last 5 messages, then live messages."""
+async def chat_stream(last_id: str = ""):
+    """SSE endpoint — incremental push based on last_id, then live messages.
+
+    - If last_id is given and found in recent 5 messages, pushes only newer ones.
+    - Otherwise pushes the last 5 messages.
+    - Sends a heartbeat comment (": heartbeat") every 25 seconds."""
+
+    COUNT = 5
 
     async def _event_stream():
         queue: asyncio.Queue = asyncio.Queue()
         sse_queues.append(queue)
+
+        # Heartbeat: keep the connection alive
+        async def heartbeat():
+            while True:
+                await asyncio.sleep(25)
+                await queue.put(None)  # sentinel for heartbeat
+
+        heartbeat_task = asyncio.create_task(heartbeat())
+
         try:
-            # Replay last 5 messages on connect
-            for msg in chat_messages[-5:]:
+            # Convert to list for slicing (deque doesn't support slices)
+            msgs = list(chat_messages)
+
+            if last_id:
+                # Search from the end for the last_id
+                idx = -1
+                for i in range(len(msgs) - 1, max(len(msgs) - COUNT - 1, -1), -1):
+                    if msgs[i]["id"] == last_id:
+                        idx = i
+                        break
+                replay = msgs[idx + 1 :] if idx >= 0 else msgs[-COUNT:]
+            else:
+                replay = msgs[-COUNT:]
+
+            for msg in replay:
                 yield f"data: {json.dumps(msg)}\n\n"
-            # Stream live messages
+
+            # Stream live messages + heartbeat
             while True:
                 msg = await queue.get()
-                yield f"data: {json.dumps(msg)}\n\n"
+                if msg is None:
+                    # SSE comment — heartbeat, silently ignored by browser
+                    yield ": heartbeat\n\n"
+                else:
+                    yield f"data: {json.dumps(msg)}\n\n"
         except asyncio.CancelledError:
             pass
         finally:
+            heartbeat_task.cancel()
             sse_queues.remove(queue)
 
     return StreamingResponse(
@@ -178,6 +228,7 @@ async def chat_stream():
             "X-Accel-Buffering": "no",
         },
     )
+
 
 # ── static files (must be mounted last so API routes take priority) ─
 

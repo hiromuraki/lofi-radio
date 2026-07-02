@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-A Lo-Fi Radio web player with a flat glassmorphism UI and CRT beam-collapse power-on/off animation. The frontend is a self-contained HTML/CSS/JS page served by a FastAPI backend that indexes media from `data/` at startup and serves them via SHA256-addressed API routes. Also includes a real-time chat room (SSE) and an ambient mixer placeholder panel.
+A Lo-Fi Radio web player — CRT beam-collapse power-on/off animation, flat glassmorphism UI, single-file vanilla-JS frontend, FastAPI backend. Includes real-time chat (SSE) and ambient mixer placeholder.
 
 ## Commands
 
@@ -12,70 +12,74 @@ A Lo-Fi Radio web player with a flat glassmorphism UI and CRT beam-collapse powe
 # Install dependencies
 uv sync
 
-# Start dev server (hot reload on)
-uv run uvicorn src.app:app --host 0.0.0.0 --port 8000 --reload
-# or
+# Dev server (hot reload)
 ./run.sh
+# or manually:
+DATA_DIR=./data uv run uvicorn src.app:app --host 0.0.0.0 --port 8000 --reload
+
+# Container build & run (Podman)
+podman build -t lofi-radio .
+podman run -p 8092:8000 -v /path/to/data:/data lofi-radio
 ```
 
 ## Architecture
 
 ```text
-src/app.py              # FastAPI backend — media indexing + API routes + chat SSE + static mount
-static/index.html       # Single-page radio UI (HTML + CSS + JS inline, ~800 lines)
-static/fonts/           # Local Inter font files (300/400/500/600 — no CDN dependency)
-data/music/*.mp3        # Audio source files (3 tracks)
-data/image/*.jpg        # Image source files (2 images)
-run.sh                  # Startup helper
+src/app.py           # FastAPI — media indexing, API routes, chat SSE, static mount
+static/index.html    # Single-page UI (HTML + CSS + JS inline)
+static/icons.svg     # SVG sprite sheet (power, volume, fullscreen icons)
+static/fonts/        # Local Inter (300/400/500/600) — zero CDN dependency
+data/music/*.mp3     # Audio source files
+data/image/*.jpg     # Image source files
+Dockerfile           # Multi-stage uv-based container build
+run.sh               # Dev startup (sets DATA_DIR=$(pwd)/data)
 ```
 
 ### Backend (`src/app.py`)
 
-- **Startup**: Scans `data/music/` and `data/image/`, computes SHA256 of each file, builds in-memory indexes.
-  - `image_index: dict[str, Path]` — `{sha256: filepath}`
-  - `music_index: dict[str, dict]` — `{sha256: {"path": str, "title": str}}`
-- **Media routes** (registered before static mount):
-  - `GET /musiclist` → `[{"sha256":..., "title":...}, ...]`
-  - `GET /imagelist` → `[{"sha256":...}, ...]`
+- **Startup** (lifespan): scans `$DATA_DIR/music/` and `$DATA_DIR/image/`, SHA256-hashes each file, builds in-memory indexes. Default `DATA_DIR=/data` (container), overridden by `run.sh` for local dev.
+- **ProxyHeadersFix middleware**: reads `X-Forwarded-For` header and patches `scope["client"]` so `req.client.host` returns real client IP behind reverse proxy. Independent of uvicorn's `--proxy-headers`.
+- **Media routes** (registered BEFORE static mount):
+  - `GET /musiclist?freq=<int>` → up to 64 tracks, seeded-shuffled with `freq` as `random.Random` seed (deterministic per frequency)
+  - `GET /imagelist?freq=<int>` → up to 64 images, same seeded shuffle
   - `GET /music/{sha256}` → `FileResponse` (audio/mpeg)
   - `GET /image/{sha256}` → `FileResponse`
-- **Chat routes** (in-memory, no persistence):
-  - `POST /chat/send` — receive `{"content":"..."}` (1–256 chars), broadcast via SSE
-  - `GET /chat/whoami` — return `{"ip":"x.x.x.x"}` so clients know their own messages
-  - `GET /chat/stream` — SSE endpoint: replays last 10 messages on connect, then live push
-  - Shared state: `chat_messages: list[dict]` + `sse_queues: list[asyncio.Queue]`
-- **Static mount**: `StaticFiles` at `/` with `html=True` (must be last so API routes take priority).
-- Uses FastAPI `lifespan` context manager for startup indexing.
+- **Chat** (in-memory, no persistence):
+  - `chat_messages = deque(maxlen=64)` — auto-evicts oldest
+  - `POST /chat/send` — `{"content":"…"}` (1–256 chars), assigns UUID `id`, broadcasts via SSE
+  - `GET /chat/whoami` — returns `ip`, `x_forwarded_for`, `x_real_ip` (debug)
+  - `GET /chat/stream?last_id=<uuid>` — SSE: incremental push if `last_id` found in last 5, else replays last 5. Heartbeat `: heartbeat\n\n` every 25s.
+- **Static mount**: `StaticFiles` at `/` with `html=True`, must be last so API routes take priority.
 
 ### Frontend (`static/index.html`)
 
-Single-file vanilla JS app — no build step, no framework.
+Single-file, no build step, no framework.
 
-**Layout** (absolute positioning over full-viewport CRT bezel):
+**Layout** (z-index stack inside full-viewport `.crt-bezel`):
 
-| Element | Position | Style |
-|---------|----------|-------|
-| `.crt-bezel` | `absolute, inset:0` | Dark background, `overflow:hidden` |
-| `.top-bar` | absolute, top-center | Glass (clock + signal dot) |
-| `.song-bar` | absolute, bottom-center | Glass (marquee track title) |
-| `.controls` | absolute, bottom-center | Glass (power, tuner, volume, fullscreen) |
-| `.chat-panel` | absolute, right side, 260px | Transparent — bubbles only |
-| `.ambient-toggle` | `fixed`, left edge, vertical | Accent tab, opens flyout |
-| `.ambient-panel` | `fixed`, left 0, 33vw | Glass flyout, 5 dummy sliders |
+| Layer | z-index | What |
+|-------|---------|------|
+| `.art-bg` | 0 | Full-bleed dynamic background image |
+| `.bg-overlay` | 1 | Dark glass overlay (`backdrop-filter: blur`) |
+| `.layout-3col` | 2 | Logical 3-col flex (left 260px / center flex / right 260px) |
+| `.scanlines` | 5 | CRT scanline overlay |
+| `.static-noise` | 6 | Tuning static effect |
 
-**CRT effect**: Two-layer structure for beam collapse:
-- `.crt-bezel` — dark bezel with `overflow:hidden` (clips expanding beam)
-- `.crt-content` — animation target: `body.power-on` → `crt-on` keyframes; `body.power-off` → `crt-off`. Uses `scale(0, 0.005)` → `scale(1, 1)` with `brightness()` ramp to simulate cathode ray beam.
+Floating elements at z-index 10: `.top-bar` (clock + signal), `.controls` (power/tuner/volume/fullscreen).
 
-**Audio engine**: Dual `<audio>` element pool. Active plays, standby pre-fetches next track when `duration - currentTime ≤ 10`. On `ended`, roles swap for near-seamless transitions.
+**Tuning** (frequency-driven, backend-seeded):
+1. Slider input (87.5–108.0 MHz) → 600ms debounce → fetch `GET /musiclist?freq=<int>` + `GET /imagelist?freq=<int>`
+2. Backend returns up to 64 items shuffled deterministically by `freq` seed
+3. Frontend plays from `musicList[currentIdx]`, advances sequentially; `artIdx` cycles through `imageList`
 
-**Tuning flow**:
-1. Slider input → pause audio, show static noise, update frequency display
-2. 600ms debounce → frequency value as seed (mulberry32 PRNG) → Fisher-Yates shuffle playlist
-3. Load first track from shuffled order, play, pick random image from `/imagelist`
+**Audio engine**: Dual `<audio>` element pool — active plays, standby pre-fetches next track 10s before end via `timeupdate`. On `ended`, roles swap for near-seamless transitions.
 
-**Chat**: SSE connection on power-on (`EventSource`). Messages stored client-side capped at 20. Own IP fetched from `/chat/whoami` — self messages bubble right (accent-tinted), others left. Text-only, 256-char limit, no persistence.
+**Chat**: SSE incremental reconnect (`?last_id=`). Client-side dedup by message UUID. Max 5 messages displayed, bottom-anchored (`::before` spring + `justify-content: flex-end` removed from scrollable container). Self vs other distinguished by IP match from `/chat/whoami`.
 
-**Power lifecycle**:
-- `powerOn()` → `body.className = "power-on"` → CRT animation → `connectChat()` + fetch indexes → play
-- `powerOff()` → `body.className = "power-off"` → CRT collapse → `disconnectChat()` → clear art after animation
+**Icons**: SVG sprite in `static/icons.svg` with `<symbol>` definitions for `#power`, `#volume-high/medium/low/mute`, `#fullscreen`, `#fullscreen-exit`. Referenced via `<svg><use href="/icons.svg#..."/></svg>`. Volume icon switches `href` based on level; fullscreen toggles on `fullscreenchange` event.
+
+**Slider styling**:
+
+- `input[type="range"]`: track fill via JS `linear-gradient` (accent color left of thumb), Firefox `-moz-` pseudo-elements
+- Tuner: 6px track, 24×14px lozenge thumb + `ew-resize` cursor + faint tick marks (`.ctl-group-tuner::before`)
+- Volume: 40px circle button, slider popup opens on hover (`.ctl-group-vol:hover .vol-popup`), click toggle fallback for touch

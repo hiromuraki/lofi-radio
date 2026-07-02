@@ -1,0 +1,67 @@
+<svg xmlns="http://www.w3.org/2000/svg" style="display:none">
+  <defs>
+    <!-- Power / standby -->
+    <symbol id="power" viewBox="0 0 24 24" fill="none"
+      stroke="currentColor" stroke-width="2"
+      stroke-linecap="round" stroke-linejoin="round">
+      <path d="M12 2v10" />
+      <path d="M18.4 6.6a9 9 0 1 1-12.8 0" />
+    </symbol>
+
+    <!-- Volume: high -->
+    <symbol id="volume-high" viewBox="0 0 24 24" fill="none"
+      stroke="currentColor" stroke-width="2"
+      stroke-linecap="round" stroke-linejoin="round">
+      <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" />
+      <path d="M15.54 8.46a5 5 0 0 1 0 7.07" />
+      <path d="M19.07 4.93a10 10 0 0 1 0 14.14" />
+    </symbol>
+
+    <!-- Volume: medium -->
+    <symbol id="volume-medium" viewBox="0 0 24 24" fill="none"
+      stroke="currentColor" stroke-width="2"
+      stroke-linecap="round" stroke-linejoin="round">
+      <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" />
+      <path d="M15.54 8.46a5 5 0 0 1 0 7.07" />
+    </symbol>
+
+    <!-- Volume: low -->
+    <symbol id="volume-low" viewBox="0 0 24 24" fill="none"
+      stroke="currentColor" stroke-width="2"
+      stroke-linecap="round" stroke-linejoin="round">
+      <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" />
+    </symbol>
+
+    <!-- Volume: mute -->
+    <symbol id="volume-mute" viewBox="0 0 24 24" fill="none"
+      stroke="currentColor" stroke-width="2"
+      stroke-linecap="round" stroke-linejoin="round">
+      <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" />
+      <line x1="23" y1="9" x2="17" y2="15" />
+      <line x1="17" y1="9" x2="23" y2="15" />
+    </symbol>
+
+    <!-- Fullscreen enter: arrows point outward from corners toward center -->
+    <symbol id="fullscreen" viewBox="0 0 24 24" fill="none"
+      stroke="currentColor" stroke-width="2"
+      stroke-linecap="round" stroke-linejoin="round">
+      <!-- L bracket at top-right corner (21,3), 6px arms opening toward center -->
+      <polyline points="15 3 21 3 21 9" />
+      <!-- L bracket at bottom-left corner (3,21), 6px arms opening toward center -->
+      <polyline points="9 21 3 21 3 15" />
+      <!-- Arrow from corner toward center -->
+      <line x1="21" y1="3" x2="14" y2="10" />
+      <line x1="3" y1="21" x2="10" y2="14" />
+    </symbol>
+
+    <!-- Fullscreen exit: arrows point outward from center to corners -->
+    <symbol id="fullscreen-exit" viewBox="0 0 24 24" fill="none"
+      stroke="currentColor" stroke-width="2"
+      stroke-linecap="round" stroke-linejoin="round">
+      <polyline points="20 10 14 10 14 4" />
+      <polyline points="4 14 10 14 10 20" />
+      <line x1="14" y1="10" x2="21" y2="3" />
+      <line x1="3" y1="21" x2="10" y2="14" />
+    </symbol>
+  </defs>
+</svg>
